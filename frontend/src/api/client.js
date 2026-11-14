@@ -6,6 +6,10 @@ export async function api(path,options={}){
 }
 export async function download(id,format){
  const r=await fetch('/api/deliveries/'+id+'/download?format='+format,{headers:{Authorization:'Bearer '+session.token}});
- if(!r.ok)throw new Error('下载失败，请重试');
+ if(!r.ok){
+  let detail='下载失败，请重试';
+  try{const d=await r.json();if(typeof d.detail==='string')detail=d.detail;}catch{}
+  throw new Error(detail);
+ }
  const u=URL.createObjectURL(await r.blob()),a=document.createElement('a');a.href=u;a.download='分析归档-'+id+'.'+format;a.click();setTimeout(()=>URL.revokeObjectURL(u),1000);
 }

@@ -3,8 +3,17 @@
 分类独立性检验的真实业务分析小型项目。完整模拟客户、痛点、上下游、算法公式与一天工作剧本见 [BUSINESS.md](BUSINESS.md)。
 
 ## 模块与业务流程
-数据接入（JSON/CSV、字段验证、批次指纹）→ 参数化分析（异步 Python worker）→ 结果复核（指标、图形、明细、解释、批准）→ 定时分发（本地收件箱、CSV/JSON、SHA256）；另有业务总览和审计轨迹。
-三个贯穿全栈的实体：Dataset 数据批次、Job 分析任务、Report 分发计划；辅助 User、Audit、Delivery。
+数据接入（JSON/CSV、字段验证、批次指纹）→ 参数化分析（异步 Python worker）→ 结果复核（指标、图形、明细、解释、批准/撤回）→ 定时分发（本地收件箱、CSV/JSON、SHA256、撤回拦截）；另有业务总览和审计轨迹。
+三个贯穿全栈的实体：Dataset 数据批次、Job 分析任务、Report 分发计划；辅助 User、Approval、Audit、Delivery。
+
+## 批准撤回口径
+发现已批准结论的口径错误时，负责人在结果页填写原因撤回批准，撤回与后续处理在同一事务内生效：
+- 关联分发计划立即停发并置为拦截态；重新批准不会恢复旧计划，需另建新计划。
+- 旧归档保留在收件箱与数据库中供审计，但 CSV/JSON 下载一律拒绝（后端按归档与所属计划双重拦截）。
+- 撤回与分发并发时，晚完成的简报只能以拦截态落库、不写可下载文件；PostgreSQL 以 `FOR UPDATE` 行锁串行化，锁序统一为任务→计划。
+- 重新批准追加新的不可变审批记录（Approval）；撤回失败（如重复撤回、缺原因）不产生任何记录，安全重试不重复记账。
+- 结果页可查审批经过、撤回原因与关联计划拦截状态；收件箱可查每份归档的拦截状态。
+- 旧库迁移幂等：自动补列、建 approvals 表并为历史已批准任务回填批准记录，原有关联保持不变。
 
 ## 快速启动
 ```bash
@@ -18,9 +27,9 @@ docker compose exec -T backend python -m scripts.seed_demo
 ## 演示账号与权限
 |账号|密码|真实权限|
 |---|---|---|
-|admin@demo.local|Demo123!|接入、执行、批准、分发、暂停、读取与下载|
-|analyst@demo.local|Demo123!|接入、执行、读取与下载；不能批准或安排分发|
-|viewer@demo.local|Demo123!|只读与下载|
+|admin@demo.local|Demo123!|接入、执行、批准、撤回批准、分发、暂停、读取与下载|
+|analyst@demo.local|Demo123!|接入、执行、读取与下载；不能批准、撤回或安排分发|
+|viewer@demo.local|Demo123!|只读与下载（撤回拦截的归档不可下载）|
 
 ## 技术与本地开发
 Python 3.12 / FastAPI / SQLAlchemy / NumPy / SciPy / scikit-learn；PostgreSQL 16；Redis 7；Nginx；原生 HTML CSS JavaScript ES modules（用户指定）。后端所有校验、持久化和算法在服务端。无前端打包步骤。
@@ -29,7 +38,7 @@ Python 3.12 / FastAPI / SQLAlchemy / NumPy / SciPy / scikit-learn；PostgreSQL 1
 ## 目录与工程约定
 backend/src/{models,schemas,services,routes,controllers,middlewares,constants,config,utils}；backend/scripts/seed_demo.py；backend/migrations/initial.py。
 frontend/src/{api,stores,types,components/common,hooks,pages,router,utils,constants}。
-Role 枚举：admin/analyst/viewer；JobStatus：queued/running/completed/failed。后端 backend/src/constants/enums.py，前端 frontend/src/constants/enums.js；路由权限在 middlewares/auth.py；页面按相同角色控制操作入口。
+Role 枚举：admin/analyst/viewer；JobStatus：queued/running/completed/failed；Approval 动作：approve/revoke。后端 backend/src/constants/enums.py，前端 frontend/src/constants/enums.js；路由权限在 middlewares/auth.py；页面按相同角色控制操作入口。
 
 ## 环境变量与 Docker
 COMPOSE_PROJECT_NAME=guide-chi；FRONTEND_PORT=18204；BACKEND_PORT=19204；DB_PORT=17704；DB_PASSWORD、JWT_SECRET 见 .env.example；SEED_DEMO 默认 true。共享命名产物卷供后端下载与 worker 写入，数据库/Redis 各持久卷。

@@ -30,9 +30,15 @@ def tick():
         queued=list(db.scalars(select(Job.id).where(Job.status=='queued').limit(3)))
     for job_id in queued:execute(job_id)
     with Session() as db:
-        for r in db.scalars(select(Report).where(Report.enabled==True,Report.next_run<=time.time())):
-            d=deliver(db,r)
-            if d:record(db,'worker','report.delivered',{'id':r.id,'delivery':d.id})
+        due = db.scalars(select(Report).where(Report.enabled == True,
+                                              Report.blocked == False,
+                                              Report.next_run <= time.time()))
+        for r in due:
+            d = deliver(db, r)
+            if d is None:
+                continue
+            if not getattr(d, 'blocked', False):
+                record(db, 'worker', 'report.delivered', {'id': r.id, 'delivery': d.id})
         db.commit()
 def main():
     r=Redis.from_url(REDIS_URL,socket_timeout=3)
